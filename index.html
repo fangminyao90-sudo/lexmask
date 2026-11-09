@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="LexMask — 法律文书智能脱敏工具。上传 Word / PDF，识别敏感信息，逐项确认后导出。">
+<title>LexMask — 法律文书智能脱敏工具</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233C5A6E'/%3E%3Cpath d='M11 9v11.5a3 3 0 0 0 3 3h7' stroke='%23fff' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<script src="./tailwind.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          canvas: '#F7F8F9',
+          surface: '#FFFFFF',
+          ink: '#20262D',
+          muted: '#5E6873',
+          faint: '#8B949E',
+          line: '#E4E8EB',
+          accent: '#3C5A6E',
+          'accent-deep': '#314B5B',
+          'accent-soft': '#EDF2F5',
+          'accent-line': '#C9D6DE',
+          warn: '#8A6A3A',
+          'warn-soft': '#FBF6EC',
+          danger: '#8A4A45',
+          'danger-soft': '#FAF0EF',
+          ok: '#3F6A58',
+          'ok-soft': '#EEF5F1'
+        },
+        fontFamily: {
+          sans: ['-apple-system','BlinkMacSystemFont','"Segoe UI"','"PingFang SC"','"Hiragino Sans GB"','"Microsoft YaHei"','"Noto Sans CJK SC"','"Source Han Sans SC"','sans-serif']
+        }
+      }
+    }
+  };
+</script>
+<script src="./jszip.min.js"></script>
+<style>
+  :root{--canvas:#F7F8F9;--surface:#fff;--ink:#20262D;--muted:#5E6873;--faint:#8B949E;--line:#E4E8EB;--accent:#3C5A6E;--accent-soft:#EDF2F5;--accent-line:#C9D6DE;--warn:#8A6A3A;--warn-soft:#FBF6EC;--danger:#8A4A45;--danger-soft:#FAF0EF;--ok:#3F6A58;--ok-soft:#EEF5F1}
+  html{scroll-behavior:auto}
+  body{font-size:15px}
+  .hidden{display:none !important}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+  ::selection{background:#D8E4EA;color:var(--ink)}
+  .scroll-thin::-webkit-scrollbar{width:8px;height:8px}
+  .scroll-thin::-webkit-scrollbar-thumb{background:#D7DDE1;border-radius:8px}
+  .scroll-thin::-webkit-scrollbar-track{background:transparent}
+
+  /* 步骤条 */
+  .step{display:flex;align-items:center;gap:9px;padding:9px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);white-space:nowrap}
+  .step-num{font-size:12px;font-weight:600;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+  .step-label{font-size:13px;font-weight:500}
+  .step-todo{color:var(--faint)}
+  .step-active{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent)}
+  .step-done{color:var(--ok);border-color:#D5E3DC;background:var(--ok-soft)}
+  .step-line{flex:1;height:1px;background:var(--line);min-width:24px;margin:0 10px}
+  .step-line-done{background:#BFD4C9}
+
+  /* 候选列表 */
+  .finding{display:block;width:100%;text-align:left;padding:13px 14px;border:1px solid transparent;border-bottom:1px solid var(--line);background:transparent;transition:background-color .12s ease}
+  .finding:last-child{border-bottom-color:transparent}
+  .finding:hover{background:#FAFBFC}
+  .finding-active{background:var(--accent-soft);border-color:var(--accent-line);border-radius:10px}
+  .fmark{font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;width:26px;flex:none;padding-top:2px}
+  .mark-pending{color:var(--faint)}
+  .mark-accepted{color:var(--ok);font-weight:700}
+  .mark-rejected{color:var(--danger);font-weight:700}
+  .ftitle{font-size:14px;font-weight:600;color:var(--ink);word-break:break-all}
+  .arrow{color:var(--faint);font-size:12px}
+  .fsug{font-size:13px;color:var(--accent);font-weight:500;word-break:break-all}
+  .tag-cat{display:inline-block;padding:1px 7px;border:1px solid var(--line);border-radius:6px;color:var(--muted);font-size:11px;background:#fff}
+  .fctx{margin-top:7px;font-size:12px;color:var(--faint);line-height:1.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:1px 7px;border-radius:6px;font-size:11px;border:1px solid var(--line);background:#fff;color:var(--muted)}
+  .badge i{width:7px;height:7px;border-radius:50%;display:inline-block;font-style:normal}
+  .badge-high i{background:currentColor}
+  .badge-medium i{background:linear-gradient(90deg,currentColor 50%,transparent 50%);border:1px solid currentColor}
+  .badge-low i{border:1px solid currentColor;background:transparent}
+  .badge-high{color:var(--ok)}
+  .badge-medium{color:var(--accent)}
+  .badge-low{color:var(--warn)}
+
+  /* 预览高亮 */
+  .hl-old{background:#F7E6E4;color:#7A3F3A;border-radius:3px;padding:0 2px}
+  .hl-new{background:#E4F0EA;color:#2F5B49;border-radius:3px;padding:0 2px}
+  .preview-line{font-size:14px;line-height:2;color:var(--ink);word-break:break-word}
+  .kv{font-size:12px;color:var(--faint)}
+  .kv strong{display:block;margin-top:2px;font-size:13px;font-weight:500;color:var(--ink)}
+
+  /* 复选与输入框 */
+  .cbx{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex:none}
+  .inp{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:14px;color:var(--ink);background:#fff}
+  .inp:focus{outline:none;border-color:var(--accent-line);box-shadow:0 0 0 3px var(--accent-soft)}
+  .lbl{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 15px;border-radius:9px;font-size:13px;font-weight:500;border:1px solid var(--line);background:#fff;color:var(--ink);transition:background-color .12s ease,border-color .12s ease;cursor:pointer;white-space:nowrap}
+  .btn:hover{background:var(--canvas)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
+  .btn-primary:disabled:hover{background:var(--accent);border-color:var(--accent)}
+  .btn-quiet{background:transparent;border-color:transparent;color:var(--muted)}
+  .btn-quiet:hover{background:var(--canvas)}
+  .btn-active{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
+  .chip{display:inline-flex;align-items:center;padding:3px 9px;border:1px solid var(--line);border-radius:7px;font-size:12px;color:var(--muted);background:#fff}
+  .notice{border-radius:10px;padding:14px 16px;font-size:13px;line-height:1.75}
+  .notice-warn{background:var(--warn-soft);border:1px solid #EEDFC5;color:#6E5630}
+  .notice-danger{background:var(--danger-soft);border:1px solid #EED8D5;color:#78413D}
+  .notice-ok{background:var(--ok-soft);border:1px solid #D5E3DC;color:#335A49}
+  .cat-item{display:flex;align-items:flex-start;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer;transition:border-color .12s ease}
+  .cat-item:hover{border-color:var(--accent-line)}
+  .cat-item input{margin-top:2px}
+  .filter-tab{padding:6px 10px;border-radius:8px;font-size:12px;color:var(--muted);white-space:nowrap;border:1px solid transparent}
+  .filter-tab:hover{background:var(--canvas)}
+  .filter-tab-on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent);font-weight:600}
+  #modal-backdrop{background:rgba(24,32,40,.28)}
+  .toast{box-shadow:0 8px 26px rgba(24,36,48,.12)}
+</style>
+</head>
+<body class="bg-canvas text-ink font-sans antialiased">
+
+<!-- ============ 顶部导航 ============ -->
+<header class="sticky top-0 z-30 border-b border-line bg-surface">
+  <div class="mx-auto max-w-[1200px] h-16 px-6 flex items-center justify-between gap-4">
+    <a href="#top" class="flex items-center gap-2.5 shrink-0">
+      <span class="w-8 h-8 rounded-[10px] bg-accent flex items-center justify-center">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3 4 6v6c0 4.4 3.2 8 8 9 4.8-1 8-4.6 8-9V6l-8-3Z"/>
+          <path d="M9 12h6"/><path d="M12 9v6"/>
+        </svg>
+      </span>
+      <span class="text-[17px] font-semibold tracking-tight">LexMask</span>
+      <span class="ml-1 px-2 py-0.5 text-[11px] rounded-md border border-line text-faint">演示原型</span>
+    </a>
+    <nav class="flex items-center gap-1 text-[13px]" aria-label="主导航">
+      <button type="button" class="px-3 py-2 rounded-lg text-muted hover:bg-canvas" data-modal="guide">使用说明</button>
+      <button type="button" class="px-3 py-2 rounded-lg text-muted hover:bg-canvas" data-modal="privacy">隐私与限制</button>
+      <a href="https://github.com/" target="_blank" rel="noopener noreferrer" class="px-3 py-2 rounded-lg text-muted hover:bg-canvas inline-flex items-center gap-1.5">
+        GitHub
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<!-- ============ Hero ============ -->
+<section id="top" class="border-b border-line bg-surface">
+  <div class="mx-auto max-w-[1200px] px-6 pt-14 pb-11">
+    <p class="text-[11px] tracking-[0.2em] text-accent font-medium">LEGAL DOCUMENT REDACTION</p>
+    <h1 class="mt-4 text-[32px] md:text-[40px] font-semibold tracking-tight leading-[1.25]">法律文书脱敏，保留表达与结构</h1>
+    <p class="mt-3 text-[15px] text-muted leading-7">上传 Word / PDF，识别敏感信息，逐项确认后导出。<br class="hidden md:block">不接入第三方大模型 · 同案主体保持一致的替代称谓 · 全程无需注册。</p>
+    <div id="stepper" class="mt-9 flex items-center max-w-[660px]" aria-label="操作流程"></div>
+  </div>
+</section>
+
+<!-- ============ 隐私提示 ============ -->
+<div class="mx-auto max-w-[1200px] px-6 mt-6">
+  <div class="rounded-xl border border-line bg-surface px-5 py-4 flex items-start gap-3">
+    <svg class="mt-0.5 shrink-0" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#8A6A3A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg>
+    <div class="text-[13px] leading-[1.85] text-muted">
+      <p><span class="font-semibold text-ink">处理方式与隐私提示。</span> 本页为前端演示原型，合成示例与上传内容仅在浏览器内存中处理，<span class="font-medium text-ink">不上传、不写入数据库、不使用任何持久化存储</span>，关闭页面或结束任务即清除。</p>
+      <p>正式公网部署版会把文件送至云服务器处理，请勿上传国家秘密、商业秘密、未公开案件材料或无权处理的个人信息；涉密材料请使用本地离线版。</p>
+      <p class="text-faint">机器识别可能遗漏，必须进行人工复核。本工具不构成对脱敏结果合规性、完整性或不可逆性的法律保证。</p>
+    </div>
+  </div>
+</div>
+
+<main class="mx-auto max-w-[1200px] px-6 py-7 space-y-6">
+
+  <!-- ============ 01 上传 ============ -->
+  <section id="panel-upload" class="rounded-xl border border-line bg-surface">
+    <div class="px-6 py-4 border-b border-line flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-2.5">
+        <span class="text-[12px] font-semibold text-accent tracking-wide">01</span>
+        <h2 class="text-[16px] font-semibold">上传文件并选择识别类别</h2>
+      </div>
+      <span class="text-[12px] text-faint">单文件 ≤ 10 MB · PDF ≤ 100 页 · 不支持 .doc / 扫描件 / OCR</span>
+    </div>
+
+    <div class="p-6">
+      <!-- 拖放区 -->
+      <div id="dropzone"
+           class="rounded-xl border border-dashed border-[#CBD5DA] bg-canvas px-6 py-9 text-center hover:border-accent-line hover:bg-accent-soft transition-colors duration-150">
+        <svg class="mx-auto" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#7C8B95" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <p class="mt-3 text-[15px] font-medium">把文件拖到这里，或</p>
+        <div class="mt-3.5 flex items-center justify-center gap-2 flex-wrap">
+          <label for="fileInput" id="btnPick" tabindex="0" class="btn btn-primary px-5 cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/></svg>
+            选择文件
+          </label>
+          <button type="button" id="btnPaste" class="btn px-4">粘贴文本</button>
+        </div>
+        <p class="mt-3 text-[12px] text-faint">支持 .docx / .txt · 单文件 ≤ 10 MB · 仅文本型文件（.pdf 需正式版后端）</p>
+        <p class="mt-3.5 text-[12px] text-muted">没有文件？<button type="button" id="btnSample" class="underline underline-offset-2 hover:text-accent">载入合成示例判决书</button>（全部为虚构数据）</p>
+        <p id="pickerHint" class="hidden mt-3 text-[12px] text-warn leading-6"></p>
+      </div>
+      <!-- 用 sr-only 而非 display:none：部分内嵌预览窗口会屏蔽隐藏 input 的系统文件框 -->
+      <input id="fileInput" type="file" accept=".docx,.txt,.pdf,.doc,.wps,.rtf,text/plain" class="sr-only" aria-label="选择要脱敏的文件">
+
+      <!-- 文件信息 / 错误 -->
+      <div id="fileInfo" class="hidden mt-4 flex items-center justify-between gap-4 flex-wrap rounded-[10px] border border-line px-4 py-3"></div>
+      <div id="uploadError" class="hidden mt-4 notice notice-danger" role="alert"></div>
+
+      <!-- 类别选择 -->
+      <div class="mt-5 pt-5 border-t border-line">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <button type="button" id="catToggle" class="btn" aria-expanded="false" aria-controls="catPanel">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+            选择脱敏类别
+            <span id="catCount" class="chip">12 / 12</span>
+            <svg id="catChevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <p class="text-[12px] text-faint">默认启用 12 类；金额可单独关闭</p>
+        </div>
+        <div id="catPanel" class="hidden mt-4">
+          <div id="catGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5"></div>
+          <p class="mt-3 text-[12px] text-faint leading-6">置信等级仅为分类提示，不代表「90% 准确率」之类的概率。所有候选项均可人工取消或修订。</p>
+        </div>
+      </div>
+
+      <!-- 授权 + 开始 -->
+      <div class="mt-5 pt-5 border-t border-line flex items-center justify-between gap-5 flex-wrap">
+        <label class="flex items-start gap-2.5 cursor-pointer max-w-[560px]">
+          <input id="authCheck" type="checkbox" class="cbx mt-0.5">
+          <span class="text-[13px] text-muted leading-6">我已获授权处理本文件，并已了解上述处理方式。<span class="text-faint">（勾选本身不替代法定处理依据、保密义务或跨境传输合规安排）</span></span>
+        </label>
+        <div class="flex items-center gap-3">
+          <span id="startHint" class="text-[12px] text-faint">请先载入文件或示例</span>
+          <button type="button" id="btnStart" class="btn btn-primary px-6" disabled>开始识别</button>
+        </div>
+      </div>
+      <div id="progress" class="hidden mt-4 notice notice-ok" role="status"></div>
+    </div>
+  </section>
+
+  <!-- ============ 02 人工核对 ============ -->
+  <section id="panel-review" class="hidden rounded-xl border border-line bg-surface">
+    <div class="px-6 py-4 border-b border-line flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-2.5">
+        <span class="text-[12px] font-semibold text-accent tracking-wide">02</span>
+        <h2 class="text-[16px] font-semibold">人工核对识别结果</h2>
+      </div>
+      <span class="text-[12px] text-faint">机器识别可能遗漏，请逐项复核后再导出</span>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.02fr)]">
+      <!-- 左：候选列表 -->
+      <div class="border-b border-line lg:border-b-0 lg:border-r border-line">
+        <div class="px-5 pt-4 pb-3">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <h3 class="text-[14px] font-semibold">识别结果与筛选</h3>
+            <span id="listCount" class="text-[12px] text-faint"></span>
+          </div>
+          <div id="filterTabs" class="mt-3 flex items-center gap-1 overflow-x-auto scroll-thin pb-1" role="tablist"></div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <button type="button" id="btnAcceptHigh" class="btn !px-3 !py-2 !text-[12px]">全部确认高置信度项</button>
+            <button type="button" id="btnManualAdd" class="btn !px-3 !py-2 !text-[12px]">手动添加漏项</button>
+            <span class="text-[11px] text-faint">低置信度项不会一键确认</span>
+          </div>
+        </div>
+        <div id="findingList" class="h-[430px] overflow-y-auto scroll-thin border-t border-line" aria-live="polite"></div>
+      </div>
+
+      <!-- 右：内容预览 -->
+      <div class="min-w-0">
+        <div class="px-5 py-4 border-b border-line flex items-center justify-between gap-2 flex-wrap">
+          <h3 class="text-[14px] font-semibold">内容预览 <span class="font-normal text-faint text-[12px]">（上下文 / 页码 / 段落）</span></h3>
+          <span id="docMeta" class="text-[12px] text-faint"></span>
+        </div>
+        <div id="detailEmpty" class="px-5 py-16 text-center">
+          <svg class="mx-auto" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#B7C1C8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+          <p class="mt-3 text-[13px] text-faint">从左侧选择一个候选项，查看原文与替换后的效果</p>
+        </div>
+        <div id="detailBody" class="hidden px-5 py-5">
+          <div id="detailHead" class="flex items-center gap-2 flex-wrap"></div>
+          <div id="detailGrid" class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-[10px] border border-line bg-canvas px-4 py-3"></div>
+
+          <div class="mt-5 space-y-3">
+            <div>
+              <p class="lbl !mb-1.5">原文</p>
+              <div id="ctxOriginal" class="preview-line rounded-[10px] border border-line px-4 py-3 bg-white"></div>
+            </div>
+            <div>
+              <p class="lbl !mb-1.5">替换后</p>
+              <div id="ctxReplaced" class="preview-line rounded-[10px] border border-line px-4 py-3 bg-canvas"></div>
+            </div>
+          </div>
+
+          <div id="editWrap" class="hidden mt-4 flex items-end gap-2">
+            <div class="flex-1">
+              <label for="editInput" class="lbl">修改替换词</label>
+              <input id="editInput" class="inp" type="text" autocomplete="off">
+            </div>
+            <button type="button" id="btnSaveEdit" class="btn btn-primary">保存</button>
+            <button type="button" id="btnCancelEdit" class="btn">取消</button>
+          </div>
+
+          <div class="mt-5 pt-4 border-t border-line flex items-center gap-2 flex-wrap">
+            <button type="button" id="btnAccept" class="btn !text-[12px] !px-3">[✓] 确认</button>
+            <button type="button" id="btnEdit" class="btn !text-[12px] !px-3">编辑替换</button>
+            <button type="button" id="btnScopeAll" class="btn !text-[12px] !px-3">全文应用</button>
+            <button type="button" id="btnScopeOne" class="btn !text-[12px] !px-3">只改本处</button>
+            <button type="button" id="btnBind" class="btn !text-[12px] !px-3">绑定同一主体</button>
+            <button type="button" id="btnReject" class="btn !text-[12px] !px-3">[×] 排除</button>
+          </div>
+          <p id="detailNote" class="mt-3 text-[12px] text-faint leading-6"></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="px-6 py-4 border-t border-line flex items-center justify-between gap-4 flex-wrap">
+      <p id="summaryText" class="text-[13px] text-muted"></p>
+      <div class="flex items-center gap-2.5">
+        <button type="button" id="btnReset" class="btn">取消任务 / 清除会话</button>
+        <button type="button" id="btnExport" class="btn btn-primary px-6">生成脱敏文件</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 安全导出 ============ -->
+  <section id="panel-export" class="hidden rounded-xl border border-line bg-surface">
+    <div class="px-6 py-4 border-b border-line flex items-center gap-2.5">
+      <span class="text-[12px] font-semibold text-accent tracking-wide">03</span>
+      <h2 class="text-[16px] font-semibold">导出校验与下载</h2>
+    </div>
+    <div class="p-6">
+      <div id="reportStatus" class="notice" role="status"></div>
+      <div id="reportMetrics" class="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3"></div>
+      <div class="mt-5 rounded-[10px] border border-line">
+        <div class="px-4 py-3 border-b border-line text-[13px] font-medium">导出校验明细</div>
+        <div id="reportList" class="px-4 py-2 divide-y divide-line text-[13px]"></div>
+      </div>
+      <div id="exportNote" class="mt-4 notice notice-warn"></div>
+      <div class="mt-6 pt-5 border-t border-line flex items-center justify-between gap-4 flex-wrap">
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <button type="button" id="btnDownloadMain" class="btn btn-primary">下载脱敏文件</button>
+          <button type="button" id="btnDownloadDocx" class="btn">下载 .docx（演示）</button>
+          <button type="button" id="btnDownloadReport" class="btn">下载校验报告</button>
+        </div>
+        <button type="button" id="btnFinish" class="btn">结束并清除会话数据</button>
+      </div>
+    </div>
+  </section>
+
+  <p class="pb-2 text-center text-[12px] text-faint leading-6">
+    LexMask · 辅助工具，不构成对脱敏结果合规性、完整性或不可逆性的法律保证 · 用户应对文书处理权限及最终公开内容进行人工审查
+  </p>
+</main>
+
+<!-- ============ 弹窗 / 提示 ============ -->
+<div id="modal-backdrop" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div id="modal-card" class="w-full max-w-[560px] rounded-xl border border-line bg-surface shadow-xl max-h-[86vh] flex flex-col">
+    <div class="px-6 py-4 border-b border-line flex items-center justify-between gap-3">
+      <h3 id="modal-title" class="text-[16px] font-semibold"></h3>
+      <button type="button" id="modalClose" class="btn btn-quiet !px-2 !py-1" aria-label="关闭">✕</button>
+    </div>
+    <div id="modal-body" class="px-6 py-5 overflow-y-auto scroll-thin text-[13px] leading-[1.9] text-muted"></div>
+    <div id="modal-foot" class="px-6 py-4 border-t border-line flex items-center justify-end gap-2.5 flex-wrap"></div>
+  </div>
+</div>
+<div id="toast" class="toast hidden fixed bottom-6 right-6 z-[60] max-w-[380px] rounded-[10px] border border-line bg-surface px-4 py-3 text-[13px] leading-6" role="status"></div>
+
+<script>
+/* =========================================================
+   LexMask 前端演示原型
+   所有数据仅存在于当前页面内存：无 localStorage / sessionStorage / 网络请求
+   ========================================================= */
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- 12 类敏感信息（PRD 4.1） ---------- */
+const CATEGORIES = [
+  { id:'PERSON_NAME',   label:'自然人姓名',       hint:'张某 / 李某',                 conf:'medium' },
+  { id:'ID_CARD',       label:'身份证号码',       hint:'[身份证号已隐去]',          conf:'high'   },
+  { id:'BIRTH_DATE',    label:'出生日期',         hint:'某年某月某日',              conf:'medium' },
+  { id:'PHONE',         label:'手机号码',         hint:'[手机号已隐去]',            conf:'high'   },
+  { id:'EMAIL',         label:'电子邮箱',         hint:'[邮箱已隐去]',              conf:'high'   },
+  { id:'ADDRESS',       label:'详细住址',         hint:'某市某区某地址',            conf:'low'    },
+  { id:'COMPANY',       label:'企业名称',         hint:'A公司 / B公司',             conf:'medium' },
+  { id:'USCC',          label:'统一社会信用代码', hint:'[统一社会信用代码已隐去]',  conf:'high'   },
+  { id:'BANK_ACCOUNT',  label:'银行账号等',       hint:'[银行账户已隐去]',          conf:'medium' },
+  { id:'AMOUNT',        label:'金额',             hint:'[金额已隐去]',              conf:'low'    },
+  { id:'CASE_NO',       label:'案号',             hint:'[案号已隐去]',              conf:'medium' },
+  { id:'COURT_JUDGE',   label:'法院、法官',       hint:'某人民法院 / 王某',         conf:'medium' }
+];
+const CAT = Object.fromEntries(CATEGORIES.map(c => [c.id, c]));
+const CONF_LABEL = { high:'高置信', medium:'中置信', low:'低置信' };
+const FILTERS = [['all','全部'],['pending','待确认'],['accepted','已确认'],['rejected','已排除'],['low','低置信度']];
+
+/* ---------- 识别规则：最长匹配优先，禁止重叠 ---------- */
+const RULES = [
+  { kind:'CASE_NO',      re:/[（(]\d{4}[）)][\u4e00-\u9fa5]{1,2}\d{2,6}(?:民初|民终|刑初|行初|民特|民再)\d+号/g, conf:'medium' },
+  { kind:'USCC',         re:/(?<![0-9A-Z])9[0-9A-Z]{17}(?![0-9A-Z])/g, conf:'high' },
+  { kind:'ID_CARD',      re:/(?<!\d)\d{17}[\dXx](?!\d)/g, conf:'high' },
+  { kind:'EMAIL',        re:/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, conf:'high' },
+  { kind:'PHONE',        re:/(?<!\d)1[3-9]\d{9}(?!\d)/g, conf:'high' },
+  { kind:'BANK_ACCOUNT', re:/(?<!\d)(?:\d{4} ?){3}\d{4}(?!\d)/g, conf:'medium' },
+  { kind:'ADDRESS',      re:/[\u4e00-\u9fa5]{2,4}(?:省|市)[\u4e00-\u9fa5]{0,6}(?:区|县)[\u4e00-\u9fa5]{0,8}(?:路|街|大道|巷)\d{1,4}号/g, conf:'low' },
+  { kind:'BIRTH_DATE',   re:/\d{4}年\d{1,2}月\d{1,2}日(?=出生)/g, conf:'medium' },
+  { kind:'AMOUNT',       re:/(?:人民币\s?)?\d+(?:\.\d+)?\s?(?:万元|亿元|万|元)/g, conf:'low' },
+  { kind:'COURT_JUDGE',  re:/[\u4e00-\u9fa5]{2,12}人民法院/g, conf:'medium', subtype:'court' },
+  { kind:'COMPANY',      re:/[\u4e00-\u9fa5]{2,12}(?:股份有限公司|有限公司|律师事务所)/g, conf:'medium' },
+  { kind:'PERSON_NAME',  re:/(?:原告|被告|委托诉讼代理人|诉讼代理人|代理人|申请人|被申请人|第三人|证人)[：:、\s]*([\u4e00-\u9fa5]{2,3})(?![\u4e00-\u9fa5])/g, conf:'medium', group:1 },
+  { kind:'COURT_JUDGE',  re:/(?:审判员|审判长|法官)[：:]\s*([\u4e00-\u9fa5]{2,3})(?![\u4e00-\u9fa5])/g, conf:'medium', subtype:'judge', group:1 }
+];
+
+/* ---------- 合成示例文书（全部为虚构数据，PRD 要求） ---------- */
+const SAMPLE_PARAS = [
+  { page:1, text:'北京市某区人民法院' },
+  { page:1, text:'民事判决书' },
+  { page:1, text:'（2025）京0105民初123号' },
+  { page:1, text:'原告：张三，男，1990年1月1日出生，身份证号 110101199001010015，住北京市某区某路18号。' },
+  { page:1, text:'联系电话 13800138000，电子邮箱 zhangsan@example.com。' },
+  { page:1, text:'委托诉讼代理人：李四，北京华明科技有限公司法务。' },
+  { page:2, text:'被告：北京恒远贸易有限公司，统一社会信用代码 91110105XXXXXXXXXX，开户行某银行，账号 6222 0000 0000 0000。' },
+  { page:2, text:'原告张三诉称，双方于2025年3月签订供货合同，被告未按约支付货款人民币50万元。' },
+  { page:2, text:'被告辩称已部分履行，请求依法驳回原告张三的部分诉讼请求。' },
+  { page:3, text:'经审理查明，上述合同签订及履行情况属实，本院予以确认。' },
+  { page:3, text:'审判员：王五' },
+  { page:3, text:'二〇二五年六月十日' }
+];
+const SAMPLE_FILE = { name:'合成示例_民事判决书.docx', type:'docx', size:48 * 1024, sample:true };
+
+/* ---------- 会话状态（仅内存） ---------- */
+let state = null;
+function freshState(){
+  return {
+    stage: 1,
+    file: null,
+    paragraphs: [],
+    fullText: '',
+    segments: [],
+    findings: [],
+    selectedId: null,
+    filter: 'all',
+    enabled: new Set(CATEGORIES.map(c => c.id)),
+    authorized: false,
+    amountAck: false,
+    catOpen: false,
+    report: null,
+    redactedText: '',
+    bindSeq: 0
+  };
+}
+state = freshState();
+
+/* ---------- 工具函数 ---------- */
+function allIndexes(hay, needle){
+  const out = []; let i = 0;
+  if (!needle) return out;
+  while ((i = hay.indexOf(needle, i)) !== -1){ out.push(i); i += needle.length; }
+  return out;
+}
+function validIdCard(s){
+  if (!/^\d{17}[\dXx]$/.test(s)) return false;
+  const w = [7,9,10,5,8,4,2,1,6,3,7,9,10,5,8,4,2], codes = '10X98765432';
+  let sum = 0; for (let i=0;i<17;i++) sum += (+s[i]) * w[i];
+  return codes[sum % 11] === s[17].toUpperCase();
+}
+function buildCorpus(paras){
+  let pos = 0; const segs = [], texts = [];
+  paras.forEach((p, i) => {
+    const start = pos;
+    texts.push(p.text);
+    segs.push({ start, end:start + p.text.length, page:p.page, index:i+1, text:p.text });
+    pos += p.text.length + 1;
+  });
+  return { fullText:texts.join('\n'), segments:segs };
+}
+function locateAt(offset){
+  return state.segments.find(s => offset >= s.start && offset <= s.end) || state.segments[state.segments.length-1] || {page:1,index:1,text:''};
+}
+function contextAt(start, len){
+  const ft = state.fullText;
+  const a = Math.max(0, start - 12), b = Math.min(ft.length, start + len + 12);
+  let s = ft.slice(a, start).replace(/\n/g,' ') + '【' + ft.slice(start, start+len) + '】' + ft.slice(start+len, b).replace(/\n/g,' ');
+  if (s.length > 34) s = s.slice(0, 34) + '…';
+  return s;
+}
+/* 高亮：逐段转义后再插入标记，避免 XSS，也不依赖正则（原词可含特殊字符） */
+function markText(text, term, cls, repl, onlyFirst){
+  const out = [];
+  let i = 0, done = 0;
+  while (true){
+    const j = text.indexOf(term, i);
+    if (j === -1){ out.push(esc(text.slice(i))); break; }
+    out.push(esc(text.slice(i, j)));
+    const skip = onlyFirst && done > 0;
+    out.push(skip ? esc(term) : '<mark class="'+cls+'">' + esc(repl == null ? term : repl) + '</mark>');
+    done++;
+    i = j + term.length;
+  }
+  return out.join('');
+}
+function confBadge(c){
+  return '<span class="badge badge-'+c+'"><i></i>'+CONF_LABEL[c]+'</span>';
+}
+function fmtSize(n){ return n < 1024 ? n + ' B' : (n/1024).toFixed(1) + ' KB'; }
+function toast(msg, kind){
+  const el = $('#toast');
+  const tone = kind === 'error' ? 'border-[#E4CBC8] text-danger bg-danger-soft'
+             : kind === 'warn'  ? 'border-[#EEDFC5] text-warn bg-warn-soft'
+             : 'border-line text-ink';
+  el.className = 'toast fixed bottom-6 right-6 z-[60] max-w-[380px] rounded-[10px] border bg-surface px-4 py-3 text-[13px] leading-6 ' + tone;
+  el.textContent = msg;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add('hidden'), 4200);
+}
+
+/* ---------- 弹窗 ---------- */
+let modalOnClose = null;
+function openModal(title, body, footer, onClose){
+  $('#modal-title').textContent = title;
+  $('#modal-body').innerHTML = body;
+  $('#modal-foot').innerHTML = footer || '<button type="button" class="btn" data-close>关闭</button>';
+  $('#modal-backdrop').classList.remove('hidden');
+  modalOnClose = onClose || null;
+  const f = $('#modal-body').querySelector('input, select, button') || $('#modal-foot').querySelector('button');
+  if (f) f.focus();
+}
+function closeModal(){
+  $('#modal-backdrop').classList.add('hidden');
+  if (modalOnClose){ const cb = modalOnClose; modalOnClose = null; cb(); }
+}
+$('#modalClose').addEventListener('click', closeModal);
+$('#modal-backdrop').addEventListener('click', e => { if (e.target.id === 'modal-backdrop') closeModal(); });
+document.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal-backdrop').classList.contains('hidden')) closeModal(); });
+
+$$('[data-modal]').forEach(btn => btn.addEventListener('click', () => {
+  if (btn.dataset.modal === 'guide') openGuide();
+  else openPrivacy();
+}));
+
+function openGuide(){
+  openModal('使用说明', `
+    <p class="font-medium text-ink">三步完成脱敏，无须注册登录。</p>
+    <ol class="mt-3 space-y-2 list-decimal pl-5">
+      <li><span class="text-ink font-medium">01 上传</span>：拖入 .docx / .txt，或直接载入合成示例；选择需要识别的类别，勾选授权后点击「开始识别」。</li>
+      <li><span class="text-ink font-medium">02 人工核对</span>：逐项确认、修改替换词、排除误报，必要时手动补充漏项；可把同一主体的不同称谓绑定到同一替身。</li>
+      <li><span class="text-ink font-medium">03 安全导出</span>：存在未审查候选或映射冲突时会阻止导出；通过校验后下载文件与简要统计报告。</li>
+    </ol>
+    <div class="mt-4 pt-4 border-t border-line space-y-2">
+      <p><span class="text-ink font-medium">关于置信等级：</span>高 / 中 / 低只是分类提示，不是「90% 准确率」之类未经验证的概率。低置信度项不会被默认一键确认。</p>
+      <p><span class="text-ink font-medium">关于金额：</span>金额可能影响事实认定、诉讼请求及判决理解，可单独关闭该类别。</p>
+      <p><span class="text-ink font-medium">关于会话：</span>关闭或刷新页面、取消任务后，原文与候选数据即被清除，不进入任何持久存储。</p>
+    </div>
+    <div class="mt-4 notice notice-warn">本页为前端演示原型：识别基于浏览器内的可解释规则，导出为纯文本重建。正式版由 Python 后端完成 DOCX 保格式替换、PDF 真 redaction、元数据清理与残留校验。</div>
+  `);
+}
+function openPrivacy(){
+  openModal('隐私与限制', `
+    <p><span class="text-ink font-medium">本演示原型。</span>所有处理都在浏览器内存中完成：不上传文件、不写入数据库、不调用第三方大模型或外部 NER API、不使用任何持久化存储。关闭页面或点击「结束并清除会话数据」即释放全部内容。</p>
+    <p class="mt-3"><span class="text-ink font-medium">正式公网部署版。</span>文件会上传至云服务器处理，仅可承诺应用层不持久化，不能称为「完全本地」。请勿上传国家秘密、商业秘密、未公开案件材料或无权处理的个人信息；涉密材料请使用本地离线版。</p>
+    <p class="mt-3"><span class="text-ink font-medium">能力边界。</span>不支持图片 / 扫描件 OCR、.doc / .wps / .odt、加密与损坏文件、PDF 双向转换；不提供个人账户、在线历史或长期存储。本原型无法在浏览器内完成 PDF 文本定位与安全移除，遇到 .pdf 会明确说明支持边界。</p>
+    <p class="mt-3"><span class="text-ink font-medium">法律提示。</span>中国《个人信息保护法》对个人信息、敏感个人信息及跨境提供设置了不同规则。境外云部署可能产生跨境传输问题；产品的「脱敏」不自动证明法定「匿名化」已实现。</p>
+    <p class="mt-3 text-faint">机器识别可能遗漏，必须进行人工复核。LexMask 是辅助工具，不构成对脱敏结果合规性、完整性或不可逆性的法律保证。</p>
+  `);
+}
+
+/* ---------- 步骤条 / 阶段 ---------- */
+function renderStepper(){
+  const steps = [['01','上传'],['02','人工核对'],['03','安全导出']];
+  $('#stepper').innerHTML = steps.map((s, i) => {
+    const n = i + 1;
+    const st = n < state.stage ? 'done' : n === state.stage ? 'active' : 'todo';
+    return '<div class="flex items-center '+(i<2?'flex-1':'')+'">' +
+      '<div class="step step-'+st+'"><span class="step-num">'+ (n < state.stage ? '✓' : s[0]) +'</span><span class="step-label">'+s[1]+'</span></div>' +
+      (i<2 ? '<div class="step-line '+(n < state.stage?'step-line-done':'')+'"></div>' : '') +
+    '</div>';
+  }).join('');
+}
+function goStage(n){
+  state.stage = n;
+  renderStepper();
+  $('#panel-review').classList.toggle('hidden', n < 2);
+  $('#panel-export').classList.toggle('hidden', n < 3);
+  const target = n === 2 ? $('#panel-review') : n === 3 ? $('#panel-export') : $('#panel-upload');
+  if (n > 1) target.scrollIntoView({ block:'start' });
+}
+
+/* ---------- 类别面板 ---------- */
+function renderCategories(){
+  $('#catGrid').innerHTML = CATEGORIES.map(c => `
+    <label class="cat-item">
+      <input type="checkbox" class="cbx" data-cat="${c.id}" ${state.enabled.has(c.id)?'checked':''}>
+      <span class="min-w-0">
+        <span class="block text-[13px] font-medium text-ink">${esc(c.label)} ${c.id==='AMOUNT'?'<span class="text-[11px] font-normal text-warn">（可关闭）</span>':''}</span>
+        <span class="block mt-0.5 text-[11px] text-faint">默认建议：${esc(c.hint)}</span>
+      </span>
+    </label>`).join('');
+  $('#catCount').textContent = state.enabled.size + ' / 12';
+}
+$('#catToggle').addEventListener('click', () => {
+  state.catOpen = !state.catOpen;
+  $('#catPanel').classList.toggle('hidden', !state.catOpen);
+  $('#catToggle').setAttribute('aria-expanded', String(state.catOpen));
+  $('#catChevron').style.transform = state.catOpen ? 'rotate(180deg)' : '';
+});
+$('#catGrid').addEventListener('change', e => {
+  const id = e.target.dataset.cat;
+  if (!id) return;
+  if (e.target.checked) state.enabled.add(id); else state.enabled.delete(id);
+  renderCategories();
+  updateStartState();
+});
+
+/* ---------- 文件载入 ---------- */
+function setFile(file, paras, label){
+  state.file = file;
+  state.paragraphs = paras;
+  const c = buildCorpus(paras);
+  state.fullText = c.fullText;
+  state.segments = c.segments;
+  $('#uploadError').classList.add('hidden');
+  $('#fileInfo').classList.remove('hidden');
+  $('#fileInfo').innerHTML = `
+    <div class="flex items-center gap-3 min-w-0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3C5A6E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/></svg>
+      <div class="min-w-0">
+        <p class="text-[13px] font-medium truncate">${esc(file.name)}</p>
+        <p class="text-[12px] text-faint">${esc(label)} · ${fmtSize(file.size)} · ${paras.length} 个段落</p>
+      </div>
+    </div>
+    <button type="button" id="btnRemoveFile" class="btn !px-3 !py-1.5 !text-[12px]">移除</button>`;
+  $('#btnRemoveFile').addEventListener('click', () => { clearFile(); $('#uploadError').classList.add('hidden'); });
+  updateStartState();
+}
+function clearFile(){
+  state.file = null; state.paragraphs = []; state.fullText = ''; state.segments = [];
+  $('#fileInput').value = '';
+  $('#fileInfo').classList.add('hidden');
+  updateStartState();
+}
+function showUploadError(msg, actionLabel, actionFn){
+  const el = $('#uploadError');
+  el.innerHTML = '<div>' + esc(msg) + '</div>'
+    + (actionLabel ? '<div class="mt-2.5"><button type="button" class="btn !py-1.5 !px-3 !text-[12px]" id="errAction">' + esc(actionLabel) + '</button></div>' : '');
+  el.classList.remove('hidden');
+  if (actionLabel && actionFn) $('#errAction').addEventListener('click', actionFn);
+}
+function validateFile(file){
+  if (!file) return '未选择文件，请重试。';
+  const name = file.name || '';
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  if (ext === 'doc' || ext === 'wps' || ext === 'rtf')
+    return '这是旧版二进制格式（.' + ext + '），浏览器前端无法安全解析。请用 Word / WPS「另存为 .docx」后再上传，或点「粘贴文本」直接把正文粘进来。';
+  if (ext === '')
+    return '这个文件没有扩展名，无法判断格式。请上传 .docx / .txt，或用「粘贴文本」入口。';
+  if (ext !== 'docx' && ext !== 'pdf' && ext !== 'txt')
+    return '不支持 .' + ext + ' 文件。当前演示可直接处理 .docx 与 .txt；正式版增加文本型 .pdf 与 .doc 转换。也可以点「粘贴文本」直接把正文粘进来。';
+  if (file.size === 0) return '文件为空或已损坏，请重新选择。';
+  if (file.size > 10*1024*1024) return '文件超过 10 MB 限制，请压缩或拆分后再试。';
+  return null;
+}
+async function handleFile(file){
+  $('#uploadError').classList.add('hidden');
+  const err = validateFile(file);
+  if (err){ showUploadError(err); clearFile(); return; }
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const head = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+  const magic = String.fromCharCode.apply(null, head);
+  if (ext === 'docx' && magic.slice(0,2) !== 'PK'){
+    showUploadError('文件格式检查未通过：.docx 应为有效的 ZIP/OOXML 包。文件可能已损坏或扩展名不符，请重新导出后再试。'); clearFile(); return;
+  }
+  if (ext === 'pdf'){
+    showUploadError('已识别为文本型 PDF，但浏览器原型不具备 PyMuPDF 的页面坐标定位与真 redaction 能力，前端做「脱敏」只能是假安全，所以此处不做处理。两条可用路径：把正文复制出来用「粘贴文本」载入；或上传 .docx。正式版由 Python 后端完成 PDF 处理。',
+      '改用粘贴文本', openPasteModal);
+    clearFile(); return;
+  }
+  try {
+    let lines = [];
+    if (ext === 'txt'){
+      const buf = await file.arrayBuffer();
+      let t = new TextDecoder('utf-8', { fatal:false }).decode(buf);
+      // 中文 txt 常见 GBK 编码，UTF-8 解出大量乱码时回退
+      if ((t.match(/\uFFFD/g) || []).length > 2){
+        try {
+          const g = new TextDecoder('gbk', { fatal:false }).decode(buf);
+          if ((g.match(/\uFFFD/g) || []).length <= 2) t = g;
+        } catch(e){}
+      }
+      lines = t.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    } else {
+      const zip = await JSZip.loadAsync(file);
+      const docXml = await zip.file('word/document.xml').async('string');
+      if (!docXml) throw new Error('missing document.xml');
+      const doc = new DOMParser().parseFromString(docXml, 'application/xml');
+      const ps = Array.from(doc.getElementsByTagNameNS('*','p'));
+      lines = ps.map(p => Array.from(p.getElementsByTagNameNS('*','t')).map(t => t.textContent).join('').trim()).filter(Boolean);
+      if (doc.getElementsByTagName('parsererror').length) throw new Error('parse error');
+    }
+    if (!lines.length){ showUploadError('未能从文件中提取到可识别的文本。请确认这是文本型文件，而非扫描件或图片。'); clearFile(); return; }
+    const paras = lines.map((text, i) => ({ page:1, text }));
+    setFile({ name:file.name, type:ext, size:file.size, sample:false }, paras,
+      ext === 'docx' ? '已在浏览器内提取 DOCX 文本' : '纯文本');
+    toast('文件已载入，文本仅在浏览器内存中处理');
+  } catch (e) {
+    showUploadError('解析失败：无法读取该文件的内容结构。请确认文件未加密、未损坏，且为文本型 .docx / .txt。');
+    clearFile();
+  }
+}
+/* ---------- 粘贴文本（完全不依赖系统文件框的兜底入口） ---------- */
+function openPasteModal(){
+  openModal('粘贴文书正文', `
+    <p class="text-[13px] text-muted leading-6">把正文直接粘贴到下面即可，效果与上传文件完全一致：识别、复核、导出都走同一套流程。适合从 Word、PDF 阅读器或网页里复制出来的文字。</p>
+    <textarea id="pasteBox" rows="9" class="mt-3 w-full rounded-[10px] border border-line bg-canvas px-3.5 py-3 text-[13px] leading-7 outline-none focus:border-accent-line focus:bg-surface" placeholder="在此粘贴正文，例如：原告张三，身份证号 110101199001010015……"></textarea>
+    <p id="pasteMsg" class="mt-2 text-[12px] text-faint">仅在本页内存中处理，不保存、不上传。</p>
+  `,
+  '<button type="button" class="btn" data-close>取消</button><button type="button" class="btn btn-primary" id="pasteOk">载入文本</button>');
+  $('#pasteBox').focus();
+  $('#pasteOk').addEventListener('click', () => {
+    const raw = $('#pasteBox').value.replace(/\u00a0/g, ' ');
+    const paras = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (!paras.length || raw.trim().length < 10){
+      $('#pasteMsg').textContent = '内容太短，请粘贴完整段落后再试。';
+      $('#pasteMsg').className = 'mt-2 text-[12px] text-danger';
+      return;
+    }
+    setFile({ name:'粘贴的文本.txt', type:'txt', size:new Blob([raw]).size, sample:false },
+      paras.map(t => ({ page:1, text:t })), '粘贴文本');
+    closeModal();
+    toast('已载入粘贴文本，仅在浏览器内存中处理');
+  });
+}
+
+/* ---------- 上传：四条互不依赖的入口（系统选择框 / 拖放 / 粘贴 / 示例） ---------- */
+const inFrame = (() => { try { return window.self !== window.top; } catch(e){ return true; } })();
+if (inFrame){
+  const h = $('#pickerHint');
+  h.classList.remove('hidden');
+  h.innerHTML = '当前在嵌入预览框中打开，若点「选择文件」没有弹出系统窗口，属于预览环境限制：'
+    + '<a href="#" id="openNew" class="underline underline-offset-2 font-medium">在新窗口打开</a>'
+    + '，或直接把文件拖到上面的虚线框里。';
+  $('#openNew').addEventListener('click', e => {
+    e.preventDefault();
+    window.open(location.href, '_blank', 'noopener');
+  });
+}
+$('#btnPick').addEventListener('click', e => {
+  // 交由 label for 原生触发；显式调用一次以兼容不支持 label 触发的内核
+  if (e.target.tagName !== 'INPUT'){ e.preventDefault(); $('#fileInput').click(); }
+});
+$('#btnPick').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); $('#fileInput').click(); }
+});
+$('#btnPaste').addEventListener('click', () => openPasteModal());
+$('#dropzone').addEventListener('dragover', e => { e.preventDefault(); $('#dropzone').classList.add('border-accent','bg-accent-soft'); });
+$('#dropzone').addEventListener('dragleave', () => $('#dropzone').classList.remove('border-accent','bg-accent-soft'));
+$('#dropzone').addEventListener('drop', e => {
+  e.preventDefault();
+  $('#dropzone').classList.remove('border-accent','bg-accent-soft');
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f){ handleFile(f); return; }
+  // 拖入的是选中文字而非文件时，直接把文字当正文
+  const txt = e.dataTransfer.getData('text/plain');
+  if (txt && txt.trim()){
+    const paras = txt.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (paras.length){
+      setFile({ name:'拖入的文本', type:'txt', size:new Blob([txt]).size, sample:false }, paras.map(t => ({ page:1, text:t })), '粘贴文本');
+      toast('已载入拖入的文本，仅在浏览器内存中处理');
+    }
+  }
+});
+$('#fileInput').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  if (f) handleFile(f);
+  e.target.value = ''; // 允许再次选择同一个文件
+});
+$('#btnSample').addEventListener('click', e => {
+  e.stopPropagation();
+  setFile(SAMPLE_FILE, SAMPLE_PARAS.map(p => ({...p})), '合成示例（虚构数据）');
+  toast('已载入合成示例判决书');
+});
+$('#authCheck').addEventListener('change', e => { state.authorized = e.target.checked; updateStartState(); });
+function updateStartState(){
+  const ok = !!state.file && state.authorized && state.enabled.size > 0;
+  $('#btnStart').disabled = !ok;
+  $('#startHint').textContent = !state.file ? '请先载入文件或示例'
+    : !state.authorized ? '请先勾选授权确认'
+    : !state.enabled.size ? '请至少选择一类'
+    : '准备就绪';
+}
+
+/* ---------- 金额提示（PRD 4.2） ---------- */
+function amountWarning(cont){
+  openModal('关于金额脱敏的提示', `
+    <div class="notice notice-warn">金额可能影响事实认定、诉讼请求及判决理解。脱敏后可能降低文书的研究与阅读价值，建议逐项复核后再决定是否启用该类别。</div>
+    <p class="mt-4">你可以取消「金额」类别后再开始识别，或在了解影响的前提下继续启用。</p>
+  `,
+  '<button type="button" class="btn" id="amtOff">取消该类别</button><button type="button" class="btn btn-primary" id="amtKeep">仍要启用，继续识别</button>');
+  $('#amtOff').addEventListener('click', () => {
+    state.enabled.delete('AMOUNT'); renderCategories(); updateStartState();
+    $('#modal-backdrop').classList.add('hidden'); modalOnClose = null;
+    toast('已取消「金额」类别');
+    cont();
+  });
+  $('#amtKeep').addEventListener('click', () => {
+    state.amountAck = true;
+    $('#modal-backdrop').classList.add('hidden'); modalOnClose = null;
+    cont();
+  });
+}
+
+/* ---------- 识别 ---------- */
+function detect(){
+  const ft = state.fullText;
+  const raw = [];
+  RULES.forEach((r, ri) => {
+    if (!state.enabled.has(r.kind)) return;
+    const re = new RegExp(r.re.source, r.re.flags.includes('g') ? r.re.flags : r.re.flags + 'g');
+    let m;
+    while ((m = re.exec(ft)) !== null){
+      let start = m.index, text = m[0];
+      if (r.group){
+        const g = m[r.group];
+        const off = m[0].indexOf(g);
+        start = m.index + (off < 0 ? 0 : off);
+        text = g;
+      }
+      raw.push({ start, end:start + text.length, text, kind:r.kind, conf:r.conf, subtype:r.subtype || '', order:ri });
+      if (m[0].length === 0) re.lastIndex++;
+    }
+  });
+  /* 最长匹配优先：先按长度降序，再拒绝任何重叠（PRD 4.2） */
+  raw.sort((a,b) => (b.end-b.start)-(a.end-a.start) || a.start-b.start || a.order-b.order);
+  const accepted = [];
+  for (const m of raw){
+    if (!accepted.some(a => m.start < a.end && m.end > a.start)) accepted.push(m);
+  }
+  accepted.sort((a,b) => a.start-b.start);
+
+  const groups = new Map();
+  accepted.forEach(m => { if (!groups.has(m.text)) groups.set(m.text, m); });
+  const arr = Array.from(groups.values());
+  const personNames = arr.filter(g => g.kind === 'PERSON_NAME' || (g.kind === 'COURT_JUDGE' && g.subtype === 'judge')).map(g => g.text);
+  const companyNames = arr.filter(g => g.kind === 'COMPANY').map(g => g.text);
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  let seq = 0;
+  state.findings = arr.map(g => {
+    seq++;
+    let suggested, confidence = g.conf, note = '';
+    if (g.kind === 'PERSON_NAME' || (g.kind === 'COURT_JUDGE' && g.subtype === 'judge')){
+      const sur = g.text.charAt(0);
+      const same = personNames.filter(n => n.charAt(0) === sur);
+      const idx = same.indexOf(g.text);
+      suggested = same.length > 1 ? sur + '某' + (['甲','乙','丙','丁'][idx] || String(idx+1)) : sur + '某';
+    } else if (g.kind === 'COURT_JUDGE'){
+      suggested = '某人民法院';
+    } else if (g.kind === 'COMPANY'){
+      suggested = letters[companyNames.indexOf(g.text)] + '公司';
+    } else {
+      suggested = CAT[g.kind].hint;
+    }
+    if (g.kind === 'ID_CARD'){
+      if (validIdCard(g.text)) note = '身份证校验码通过。';
+      else { confidence = 'medium'; note = '身份证结构校验未通过，已降为中置信，请人工确认。'; }
+    }
+    if (confidence === 'low') note += (note ? ' ' : '') + '该项目需人工确认，不会被一键确认。';
+    const positions = allIndexes(ft, g.text);
+    const locs = positions.map(p => locateAt(p));
+    const first = locs[0] || { page:1, index:1, text:'' };
+    return {
+      id:'f_' + String(seq).padStart(3,'0'),
+      kind:g.kind, subtype:g.subtype, source:g.text, suggested,
+      confidence, note,
+      occurrences:positions.length,
+      positions,
+      locs,
+      firstText:first.text,
+      locLabel:'第 ' + first.page + ' 页 · 第 ' + first.index + ' 段',
+      context:contextAt(positions.length ? positions[0] : g.start, g.text.length),
+      status:'pending', scope:'all', boundGroup:null
+    };
+  });
+  state.selectedId = state.findings.length ? state.findings[0].id : null;
+  state.filter = 'all';
+}
+
+/* ---------- 筛选 / 列表 ---------- */
+function matchFilter(f){
+  switch (state.filter){
+    case 'pending':  return f.status === 'pending';
+    case 'accepted': return f.status === 'accepted' || f.status === 'edited';
+    case 'rejected': return f.status === 'rejected';
+    case 'low':      return f.confidence === 'low';
+    default:         return true;
+  }
+}
+function renderFilters(){
+  $('#filterTabs').innerHTML = FILTERS.map(([k, label]) => {
+    const n = k === 'all' ? state.findings.length : state.findings.filter(f => k === 'low' ? f.confidence === 'low'
+      : k === 'accepted' ? (f.status === 'accepted' || f.status === 'edited')
+      : f.status === k).length;
+    return '<button type="button" role="tab" aria-selected="'+(state.filter===k)+'" class="filter-tab '+(state.filter===k?'filter-tab-on':'')+'" data-filter="'+k+'">'+label+' <span class="opacity-70">'+n+'</span></button>';
+  }).join('');
+}
+function markClass(f){ return f.status === 'rejected' ? 'mark-rejected' : (f.status === 'accepted' || f.status === 'edited') ? 'mark-accepted' : 'mark-pending'; }
+function markText2(f){ return f.status === 'rejected' ? '[×]' : (f.status === 'accepted' || f.status === 'edited') ? '[✓]' : f.confidence === 'low' ? '[?]' : '[ ]'; }
+function renderFindings(){
+  renderFilters();
+  const list = state.findings.filter(matchFilter);
+  $('#listCount').textContent = '共 ' + state.findings.length + ' 项 · 当前显示 ' + list.length + ' 项';
+  const el = $('#findingList');
+  if (!list.length){
+    el.innerHTML = '<div class="px-5 py-14 text-center text-[13px] text-faint">当前筛选条件下没有候选项。<br>可切换筛选，或使用「手动添加漏项」补充。</div>';
+    return;
+  }
+  el.innerHTML = list.map(f => `
+    <button type="button" class="finding ${f.id===state.selectedId?'finding-active':''}" data-id="${f.id}" aria-label="查看 ${esc(f.source)} 的详情">
+      <div class="flex items-start gap-3">
+        <span class="fmark ${markClass(f)}">${markText2(f)}</span>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="ftitle">${esc(f.source)}</span>
+            <span class="arrow">→</span>
+            <span class="fsug">${esc(f.suggested)}</span>
+          </div>
+          <div class="mt-1.5 flex items-center gap-2 flex-wrap">
+            <span class="tag-cat">${esc(CAT[f.kind].label)}</span>
+            ${confBadge(f.confidence)}
+            <span class="text-[11px] text-faint">${f.locLabel} · ${f.occurrences} 处</span>
+            ${f.scope==='single'?'<span class="tag-cat">本处</span>':''}
+          </div>
+          <div class="fctx">${esc(f.context)}</div>
+        </div>
+      </div>
+    </button>`).join('');
+}
+function renderDetail(){
+  const f = state.findings.find(x => x.id === state.selectedId);
+  $('#detailEmpty').classList.toggle('hidden', !!f);
+  $('#detailBody').classList.toggle('hidden', !f);
+  if (!f) return;
+  $('#detailHead').innerHTML = '<span class="text-[15px] font-semibold">'+esc(f.source)+'</span><span class="arrow">→</span><span class="text-[14px] font-medium text-accent">'+esc(f.suggested)+'</span>'+confBadge(f.confidence)+'<span class="tag-cat">'+esc(CAT[f.kind].label)+'</span>';
+  $('#detailGrid').innerHTML =
+    '<div class="kv">所在位置<strong>'+f.locLabel+'</strong></div>' +
+    '<div class="kv">出现次数<strong>'+f.occurrences+' 处</strong></div>' +
+    '<div class="kv">当前状态<strong>'+(f.status==='rejected'?'已排除':(f.status==='accepted'||f.status==='edited')?'已确认':'待确认')+'</strong></div>' +
+    '<div class="kv">作用范围<strong>'+(f.scope==='single'?'只改本处':'全文应用')+'</strong></div>';
+  $('#ctxOriginal').innerHTML = markText(f.firstText, f.source, 'hl-old');
+  $('#ctxReplaced').innerHTML = f.status === 'rejected'
+    ? markText(f.firstText, f.source, 'hl-old')
+    : markText(f.firstText, f.source, 'hl-new', f.suggested, f.scope === 'single');
+  $('#editWrap').classList.add('hidden');
+  $('#btnScopeAll').classList.toggle('btn-active', f.scope === 'all');
+  $('#btnScopeOne').classList.toggle('btn-active', f.scope === 'single');
+  $('#btnAccept').textContent = (f.status === 'accepted' || f.status === 'edited') ? '[↩] 取消确认' : '[✓] 确认';
+  $('#btnReject').textContent = f.status === 'rejected' ? '[↩] 恢复' : '[×] 排除';
+  $('#detailNote').textContent = f.note || '替换规则可由你修改；同一实体的多次出现会统一应用，不同主体不会因同姓而合并。';
+}
+function renderSummary(){
+  const p = state.findings.filter(f => f.status === 'pending').length;
+  const a = state.findings.filter(f => f.status === 'accepted' || f.status === 'edited').length;
+  const r = state.findings.filter(f => f.status === 'rejected').length;
+  const l = state.findings.filter(f => f.confidence === 'low' && f.status !== 'rejected').length;
+  $('#summaryText').innerHTML = '已确认 <strong class="text-ink">'+a+'</strong> · 待确认 <strong class="text-ink">'+p+'</strong> · 已排除 <strong class="text-ink">'+r+'</strong> · 低置信度待审 <strong class="text-ink">'+l+'</strong>';
+  $('#docMeta').textContent = state.file ? state.file.name : '';
+}
+function renderReview(){
+  renderFindings(); renderDetail(); renderSummary();
+}
+
+/* ---------- 复核交互 ---------- */
+$('#findingList').addEventListener('click', e => {
+  const b = e.target.closest('[data-id]');
+  if (!b) return;
+  state.selectedId = b.dataset.id;
+  renderFindings(); renderDetail();
+});
+$('#filterTabs').addEventListener('click', e => {
+  const b = e.target.closest('[data-filter]');
+  if (!b) return;
+  state.filter = b.dataset.filter;
+  renderFindings();
+});
+function selected(){ return state.findings.find(f => f.id === state.selectedId); }
+function refresh(){ renderReview(); }
+
+$('#btnAccept').addEventListener('click', () => {
+  const f = selected(); if (!f) return;
+  f.status = (f.status === 'accepted' || f.status === 'edited') ? 'pending' : 'accepted';
+  refresh();
+});
+$('#btnReject').addEventListener('click', () => {
+  const f = selected(); if (!f) return;
+  f.status = f.status === 'rejected' ? 'pending' : 'rejected';
+  refresh();
+});
+$('#btnScopeAll').addEventListener('click', () => { const f = selected(); if (!f) return; f.scope = 'all'; refresh(); });
+$('#btnScopeOne').addEventListener('click', () => { const f = selected(); if (!f) return; f.scope = 'single'; refresh(); toast('已设为「只改本处」：仅首个出现位置会被替换'); });
+$('#btnEdit').addEventListener('click', () => {
+  const f = selected(); if (!f) return;
+  $('#editWrap').classList.remove('hidden');
+  $('#editInput').value = f.suggested;
+  $('#editInput').focus();
+});
+$('#btnCancelEdit').addEventListener('click', () => $('#editWrap').classList.add('hidden'));
+$('#btnSaveEdit').addEventListener('click', () => {
+  const f = selected(); if (!f) return;
+  const v = $('#editInput').value.trim();
+  if (!v){ toast('替换词不能为空', 'warn'); return; }
+  f.suggested = v; f.status = 'edited';
+  $('#editWrap').classList.add('hidden');
+  refresh(); toast('替换词已更新');
+});
+$('#editInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btnSaveEdit').click(); });
+$('#btnAcceptHigh').addEventListener('click', () => {
+  let n = 0;
+  state.findings.forEach(f => { if (f.confidence === 'high' && f.status === 'pending'){ f.status = 'accepted'; n++; } });
+  refresh();
+  toast(n ? '已确认 ' + n + ' 项高置信度候选；低置信度项仍需逐项复核' : '没有待确认的高置信度项');
+});
+
+/* 手动添加漏项（PRD 3.4） */
+$('#btnManualAdd').addEventListener('click', () => {
+  openModal('手动添加漏项', `
+    <p>输入机器遗漏的原文片段与期望的替换词。无法在文档中精确定位的词不会被添加，以避免「猜测位置后覆盖」。</p>
+    <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div><label class="lbl" for="maSource">原文（必填）</label><input id="maSource" class="inp" placeholder="例：某公司简称" autocomplete="off"></div>
+      <div><label class="lbl" for="maSug">替换词（必填）</label><input id="maSug" class="inp" placeholder="例：B公司" autocomplete="off"></div>
+      <div><label class="lbl" for="maKind">类别</label><select id="maKind" class="inp">${CATEGORIES.map(c=>'<option value="'+c.id+'">'+esc(c.label)+'</option>').join('')}</select></div>
+      <div><label class="lbl" for="maScope">作用范围</label><select id="maScope" class="inp"><option value="all">全文应用</option><option value="single">只改本处</option></select></div>
+    </div>
+    <div id="maErr" class="hidden mt-3 notice notice-danger"></div>
+  `,
+  '<button type="button" class="btn" data-close>取消</button><button type="button" class="btn btn-primary" id="maSave">添加候选</button>');
+  $('#maSave').addEventListener('click', () => {
+    const src = $('#maSource').value.trim(), sug = $('#maSug').value.trim();
+    const err = $('#maErr');
+    if (!src || !sug){ err.textContent = '原文与替换词均为必填项。'; err.classList.remove('hidden'); return; }
+    if (state.findings.some(f => f.source === src)){ err.textContent = '该原文已存在于候选列表中，请直接编辑已有项。'; err.classList.remove('hidden'); return; }
+    const pos = allIndexes(state.fullText, src);
+    if (!pos.length){ err.textContent = '未能在文档中找到这段原文，无法精确定位。请核对输入；本工具不会猜测位置后覆盖。'; err.classList.remove('hidden'); return; }
+    const locs = pos.map(p => locateAt(p));
+    const f = {
+      id:'f_m' + (++state.bindSeq), kind:$('#maKind').value, subtype:'', source:src, suggested:sug,
+      confidence:'medium', note:'用户手动添加的候选，已定位 ' + pos.length + ' 处。',
+      occurrences:pos.length, positions:pos, locs, firstText:locs[0].text,
+      locLabel:'第 ' + locs[0].page + ' 页 · 第 ' + locs[0].index + ' 段',
+      context:contextAt(pos[0], src.length),
+      status:'pending', scope:$('#maScope').value, boundGroup:null
+    };
+    state.findings.push(f);
+    state.selectedId = f.id; state.filter = 'all';
+    $('#modal-backdrop').classList.add('hidden'); modalOnClose = null;
+    refresh(); toast('已添加候选：' + src);
+  });
+});
+
+/* 绑定同一主体的不同称谓（PRD 3.4） */
+$('#btnBind').addEventListener('click', () => {
+  const f = selected(); if (!f) return;
+  const others = state.findings.filter(x => x.id !== f.id && (x.kind === 'PERSON_NAME' || x.kind === 'COMPANY' || x.kind === 'COURT_JUDGE'));
+  if (!others.length){ toast('暂无可绑定的其他主体称谓', 'warn'); return; }
+  openModal('绑定同一主体', `
+    <p>把「同一个人 / 同一组织的不同称谓」绑定到同一替身。被勾选的候选项将统一使用当前替换词 <span class="font-medium text-accent">${esc(f.suggested)}</span>，并视为同一实体，不再报映射冲突。</p>
+    <div class="mt-4 space-y-2">${others.map(x => `
+      <label class="cat-item"><input type="checkbox" class="cbx" data-bind="${x.id}" ${x.boundGroup && x.boundGroup===f.boundGroup?'checked':''}>
+      <span><span class="block text-[13px] text-ink">${esc(x.source)} → ${esc(x.suggested)}</span><span class="block text-[11px] text-faint">${esc(CAT[x.kind].label)} · ${x.occurrences} 处</span></span></label>`).join('')}</div>
+  `,
+  '<button type="button" class="btn" data-close>取消</button><button type="button" class="btn btn-primary" id="bindSave">保存绑定</button>');
+  $('#bindSave').addEventListener('click', () => {
+    const ids = $$('[data-bind]:checked', $('#modal-body')).map(i => i.dataset.bind);
+    const gid = f.boundGroup || ('g' + (++state.bindSeq));
+    f.boundGroup = gid;
+    let n = 0;
+    ids.forEach(id => { const x = state.findings.find(y => y.id === id); if (x){ x.boundGroup = gid; x.suggested = f.suggested; n++; } });
+    $('#modal-backdrop').classList.add('hidden'); modalOnClose = null;
+    refresh(); toast('已绑定 ' + n + ' 个称谓到同一替身');
+  });
+});
+
+/* ---------- 开始识别 ---------- */
+$('#btnStart').addEventListener('click', () => {
+  const run = () => {
+    $('#progress').classList.remove('hidden');
+    $('#progress').textContent = '正在解析文档结构并应用可解释规则…';
+    $('#btnStart').disabled = true;
+    setTimeout(() => {
+      try {
+        detect();
+        $('#progress').textContent = '识别完成：共发现 ' + state.findings.length + ' 组候选实体。请逐项复核，机器识别可能遗漏。';
+        renderReview();
+        goStage(2);
+      } catch (e) {
+        $('#progress').textContent = '处理未完成：文档结构解析失败，已停止并清除本次会话的中间数据。请更换文件后重试。';
+        showUploadError('解析失败：文档结构无法安全读取。请确认文件为未加密、未损坏的文本型文件。');
+      } finally {
+        $('#btnStart').disabled = false;
+        updateStartState();
+      }
+    }, 260);
+  };
+  if (state.enabled.has('AMOUNT') && !state.amountAck) amountWarning(run); else run();
+});
+
+/* ---------- 导出校验（PRD 4.4 / 6.2） ---------- */
+function findConflicts(){
+  const approved = state.findings.filter(f => f.status !== 'rejected');
+  const map = new Map();
+  approved.filter(f => ['PERSON_NAME','COMPANY','COURT_JUDGE'].includes(f.kind)).forEach(f => {
+    if (!map.has(f.suggested)) map.set(f.suggested, []);
+    map.get(f.suggested).push(f);
+  });
+  return Array.from(map.entries()).filter(([, arr]) => {
+    const sources = new Set(arr.map(f => f.source));
+    const groups  = new Set(arr.map(f => f.boundGroup || f.id));
+    return sources.size > 1 && groups.size > 1;
+  }).map(([k, arr]) => ({ text:k, items:arr.map(f => f.source) }));
+}
+function buildRedacted(approved){
+  const reps = [];
+  approved.forEach(f => {
+    allIndexes(state.fullText, f.source).forEach((p, i) => {
+      if (f.scope === 'single' && i > 0) return;
+      reps.push({ start:p, end:p + f.source.length, text:f.suggested });
+    });
+  });
+  reps.sort((a,b) => b.start - a.start || (b.end-b.start)-(a.end-a.start));
+  let out = state.fullText, lastStart = Infinity, count = 0;
+  reps.forEach(r => {
+    if (r.end > lastStart) return;               // 重叠保护
+    out = out.slice(0, r.start) + r.text + out.slice(r.end);
+    lastStart = r.start; count++;
+  });
+  return { text:out, count };
+}
+function doExport(){
+  const pending = state.findings.filter(f => f.status === 'pending');
+  const conflicts = findConflicts();
+  const approved = state.findings.filter(f => f.status !== 'rejected');
+  const res = buildRedacted(approved);
+  const leaks = approved.filter(f => f.scope === 'all' && res.text.includes(f.source));
+  const risks = [];
+  if (pending.length)   risks.push('存在 ' + pending.length + ' 项未审查候选（含低置信度项），必须先逐项处理。');
+  if (conflicts.length) risks.push('存在 ' + conflicts.length + ' 组映射冲突：不同主体被分配了相同替身，需修改替换词或绑定为同一主体。');
+  if (leaks.length)     risks.push('残留扫描发现 ' + leaks.length + ' 处已批准移除的原文仍可提取，已阻止「安全通过」。');
+  const passed = risks.length === 0;
+  state.redactedText = passed ? res.text : '';
+  state.report = {
+    passed, risks, count:res.count,
+    approved:approved.length,
+    rejected:state.findings.filter(f => f.status === 'rejected').length,
+    conflicts, leaks, pending
+  };
+  renderReport();
+  goStage(3);
+  if (!passed) toast('校验未通过：已阻止导出，请先解决未决风险', 'error');
+  else toast('文本层校验通过，可下载演示导出文件');
+}
+function reportRow(label, ok, detail){
+  return '<div class="py-2.5 flex items-start justify-between gap-4"><span>'+esc(label)+'</span><span class="text-right '+(ok?'text-ok':'text-danger')+'">'+(ok?'✓ 通过':'× '+esc(detail||'未通过'))+'</span></div>';
+}
+function renderReport(){
+  const r = state.report; if (!r) return;
+  const st = $('#reportStatus');
+  if (r.passed){
+    st.className = 'notice notice-ok';
+    st.innerHTML = '<p class="font-semibold text-[14px]">文本层校验通过 · 演示导出</p><p class="mt-1">已批准的替换已全部应用，输出文本中不再包含待移除的原文。请下载后再次人工审阅全文。</p>';
+  } else {
+    st.className = 'notice notice-danger';
+    st.innerHTML = '<p class="font-semibold text-[14px]">需要人工进一步处理 · 已阻止导出</p><ul class="mt-2 list-disc pl-5 space-y-1">' + r.risks.map(x => '<li>'+esc(x)+'</li>').join('') + '</ul><p class="mt-2">本工具不会在存在未决风险时显示「安全通过」或提供下载。</p>';
+  }
+  $('#reportMetrics').innerHTML =
+    '<div class="rounded-[10px] border border-line px-4 py-3"><p class="kv">本次替换次数</p><p class="mt-1 text-[22px] font-semibold tabular-nums">'+(r.passed?r.count:0)+'</p></div>' +
+    '<div class="rounded-[10px] border border-line px-4 py-3"><p class="kv">已确认 / 已排除</p><p class="mt-1 text-[22px] font-semibold tabular-nums">'+r.approved+' <span class="text-[14px] font-normal text-faint">/</span> '+r.rejected+'</p></div>' +
+    '<div class="rounded-[10px] border border-line px-4 py-3"><p class="kv">未解决风险</p><p class="mt-1 text-[22px] font-semibold tabular-nums '+(r.risks.length?'text-danger':'text-ok')+'">'+r.risks.length+'</p></div>';
+  $('#reportList').innerHTML =
+    reportRow('已批准移除的原文残留扫描', r.leaks.length === 0, r.leaks.length + ' 处残留') +
+    reportRow('候选项全部经人工审查', r.pending.length === 0, r.pending.length + ' 项未审查') +
+    reportRow('同一映射无冲突', r.conflicts.length === 0, r.conflicts.length + ' 组冲突') +
+    reportRow('导出文件结构可重新解析（演示文本）', r.passed, '未生成') +
+    '<div class="py-2.5 flex items-start justify-between gap-4"><span>OOXML 元数据 / 批注 / 修订 / 隐藏对象清理</span><span class="text-right text-warn">— 需后端处理</span></div>' +
+    '<div class="py-2.5 flex items-start justify-between gap-4"><span>PDF 真 redaction 与文本再提取验证</span><span class="text-right text-warn">— 需后端处理</span></div>';
+  $('#exportNote').innerHTML = '<span class="font-medium">演示导出边界：</span>本页仅处理可提取文本层，下载文件为纯文本重建，不保留原标题层级、表格与分页；也不清理元数据、批注、修订痕迹。正式版须由 Python 后端（python-docx + PyMuPDF）完成保格式替换、真实内容移除与包内残留校验后，方可用于真实文书。';
+  $('#btnDownloadMain').disabled = !r.passed;
+  $('#btnDownloadDocx').disabled = !r.passed;
+  $('#btnDownloadReport').disabled = false;
+}
+$('#btnExport').addEventListener('click', doExport);
+
+/* ---------- 下载 ---------- */
+function download(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function baseName(){ return (state.file ? state.file.name.replace(/\.[^.]+$/,'') : '文书') + '_已脱敏'; }
+$('#btnDownloadMain').addEventListener('click', () => {
+  if (!state.report || !state.report.passed) return;
+  download(new Blob([state.redactedText], { type:'text/plain;charset=utf-8' }), baseName() + '.txt');
+  toast('已下载脱敏文本（演示导出）');
+});
+$('#btnDownloadReport').addEventListener('click', () => {
+  const r = state.report; if (!r) return;
+  const lines = [
+    'LexMask 脱敏统计报告（演示原型）',
+    '生成时间：' + new Date().toLocaleString('zh-CN'),
+    '————————————————————————',
+    '导出校验状态：' + (r.passed ? '文本层校验通过（演示）' : '需要人工进一步处理 · 已阻止导出'),
+    '本次替换次数：' + (r.passed ? r.count : 0),
+    '已确认候选：' + r.approved + ' 组',
+    '已排除候选：' + r.rejected + ' 组',
+    '未解决风险：' + r.risks.length + ' 项',
+    ...r.risks.map(x => '  · ' + x),
+    '————————————————————————',
+    '说明：本报告默认不包含敏感原文；仅记录不含正文的运行状态与统计数量。',
+    '演示原型仅处理可提取文本层，未执行 OOXML 元数据清理与 PDF 真 redaction。',
+    '机器识别可能遗漏，必须进行人工复核。'
+  ];
+  download(new Blob([lines.join('\n')], { type:'text/plain;charset=utf-8' }), baseName() + '_校验报告.txt');
+  toast('已下载校验报告');
+});
+$('#btnDownloadDocx').addEventListener('click', async () => {
+  if (!state.report || !state.report.passed) return;
+  try {
+    const xmlEsc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+    const body = state.redactedText.split('\n').map(t => '<w:p><w:r><w:t xml:space="preserve">'+xmlEsc(t)+'</w:t></w:r></w:p>').join('');
+    const documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+body+'<w:sectPr/></w:body></w:document>';
+    const contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>';
+    const rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>';
+    const core = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>LexMask 演示导出</dc:title></cp:coreProperties>';
+    const app = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>LexMask Demo</Application></Properties>';
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', contentTypes);
+    zip.folder('_rels').file('.rels', rels);
+    zip.folder('word').file('document.xml', documentXml);
+    zip.folder('docProps').file('core.xml', core);
+    zip.folder('docProps').file('app.xml', app);
+    const blob = await zip.generateAsync({ type:'blob', mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    download(blob, baseName() + '.docx');
+    toast('已下载 .docx（演示：纯文本重建，不保留原版式）');
+  } catch (e) {
+    toast('演示 .docx 生成失败，请下载 .txt 版本', 'error');
+  }
+});
+
+/* ---------- 会话清理（PRD 3.4 / 6.2） ---------- */
+function resetSession(msg){
+  state = freshState();
+  $('#fileInput').value = '';
+  $('#fileInfo').classList.add('hidden');
+  $('#uploadError').classList.add('hidden');
+  $('#progress').classList.add('hidden');
+  $('#authCheck').checked = false;
+  $('#catPanel').classList.add('hidden');
+  $('#catToggle').setAttribute('aria-expanded','false');
+  $('#catChevron').style.transform = '';
+  $('#panel-review').classList.add('hidden');
+  $('#panel-export').classList.add('hidden');
+  $('#btnDownloadMain').disabled = true;
+  $('#btnDownloadDocx').disabled = true;
+  renderCategories(); renderStepper(); updateStartState();
+  window.scrollTo({ top:0 });
+  if (msg) toast(msg);
+}
+$('#btnReset').addEventListener('click', () => resetSession('会话已取消，原文与候选数据已从内存清除'));
+$('#btnFinish').addEventListener('click', () => resetSession('任务结束，会话数据已清除'));
+
+/* ---------- 初始化 ---------- */
+renderCategories();
+renderStepper();
+updateStartState();
+$('#btnDownloadMain').disabled = true;
+$('#btnDownloadDocx').disabled = true;
+</script>
+</body>
+</html>
